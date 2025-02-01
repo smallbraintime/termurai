@@ -3,8 +3,8 @@
 
     .version = "0.0.0",
     .dependencies = .{ .asciitecture = .{
-        .url = "https://github.com/0b-s3rv3r/asciitecture/archive/refs/tags/asciitecture-0.1.0.tar.gz",
-        .hash = "1220bef6ba549df17df14f2928ca653a2c9b0282dee0ca4a0a3b0f7e7b548cef4d8c",
+        .url = "https://github.com/smallbraintime/asciitecture/archive/refs/tags/asciitecture-0.1.2.tar.gz",
+        .hash = "1220f919d7c6aad0dd80dc3ba43e047e6558a921dcf5a853c9c3eb22f1148d99289b",
     } },
     .paths = .{
         "build.zig",
