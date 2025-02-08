@@ -8,27 +8,27 @@ pub const PlayerAssets = struct {
 
     pub const PLAYER_RUN_RIGHT_1 =
         \\╭───╮
-        \\│ ^^│
+        \\│ 00│
         \\╰───╯
-        \\  ) 
+        \\  )  
     ;
     pub const PLAYER_RUN_RIGHT_2 =
         \\╭───╮
-        \\│ ^^│
+        \\│ 00│
         \\╰───╯
         \\ ) ) 
     ;
     pub const PLAYER_RUN_LEFT_1 =
         \\╭───╮
-        \\│ ^^│
+        \\│00 │
         \\╰───╯
-        \\ ) ) 
+        \\ ( ( 
     ;
     pub const PLAYER_RUN_LEFT_2 =
         \\╭───╮
-        \\│^^ │
+        \\│00 │
         \\╰───╯
-        \\  ( 
+        \\  (  
     ;
 };
 

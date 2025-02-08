@@ -6,5 +6,5 @@ pub fn main() !void {
     defer if (gpa.deinit() == .leak) @panic("memory leak occured");
     var game = try Game.init(gpa.allocator());
     defer game.deinit() catch unreachable;
-    try game.run();
+    try game.run(gpa.allocator());
 }

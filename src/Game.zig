@@ -6,7 +6,7 @@ const Menu = @import("tui/Menu.zig");
 const TreeAssets = @import("assets.zig").TreeAssets;
 const PlayerAssets = @import("assets.zig").PlayerAssets;
 
-const Arena = std.ArrayList(at.math.Shape);
+pub const Arena = std.ArrayList(at.math.Shape);
 
 const Game = @This();
 
@@ -19,9 +19,12 @@ tree_crown: at.sprite.Sprite,
 fire: at.ParticleEmitter,
 blossom: at.ParticleEmitter,
 zzz: at.ParticleEmitter,
-running: bool,
+bubble: at.widgets.Paragraph,
+menu_running: bool = false,
+match_running: bool = false,
 arena: Arena,
-players: [2]Player,
+players: ?[2]Player,
+gravity: at.math.Vec2,
 // hud: Hud,
 
 pub fn init(allocator: std.mem.Allocator) !Game {
@@ -49,6 +52,7 @@ pub fn init(allocator: std.mem.Allocator) !Game {
             },
             .text_style = .{
                 .fg = .{ .rgb = .{ 203, 75, 22 } },
+                .attr = .bold,
             },
             .filling = false,
         },
@@ -75,7 +79,7 @@ pub fn init(allocator: std.mem.Allocator) !Game {
         .life_var = 1,
         .speed = 5,
         .speed_var = 2,
-        .emission_rate = 100 / 2,
+        .emission_rate = 100 / 1,
         .gravity = at.math.vec2(0, 0),
         .duration = std.math.inf(f32),
     });
@@ -122,44 +126,34 @@ pub fn init(allocator: std.mem.Allocator) !Game {
         .duration = std.math.inf(f32),
     });
 
+    const bubble = try at.widgets.Paragraph.init(
+        allocator,
+        &[_][]const u8{ "[->] - right", "[<-] - left", "[c] - jump", "[x] - dash" },
+        .{
+            .border_style = .{
+                .border = .rounded,
+                .style = .{
+                    .fg = .{ .rgb = .{ 101, 123, 131 } },
+                    .attr = .bold,
+                },
+            },
+            .text_style = .{
+                .fg = .{ .rgb = .{ 101, 123, 131 } },
+                .attr = .bold,
+            },
+            .filling = true,
+            .animation = .{
+                .speed = 10,
+                .looping = false,
+            },
+        },
+    );
+
     var term = try at.Terminal(at.LinuxTty).init(allocator, 60, .{ .height = 35, .width = 105 });
     term.setBg(.{ .rgb = .{ 238, 232, 213 } });
 
-    const left = @as(f32, @floatFromInt(term._screen.buffer.size.width / 2)) * -1;
-    const right = @as(f32, @floatFromInt(term._screen.buffer.size.width / 2));
-    const top = @as(f32, @floatFromInt(term._screen.buffer.size.height / 2)) * -1;
-    const bottom = @as(f32, @floatFromInt(term._screen.buffer.size.height / 2));
-
-    const vleft = at.math.Shape{
-        .line = .{
-            .p1 = at.math.vec2(left, top),
-            .p2 = at.math.vec2(left, bottom),
-        },
-    };
-
-    const vright = at.math.Shape{
-        .line = .{
-            .p1 = at.math.vec2(right, top),
-            .p2 = at.math.vec2(right, bottom),
-        },
-    };
-
-    const htop = at.math.Shape{
-        .line = .{
-            .p1 = at.math.vec2(left, top),
-            .p2 = at.math.vec2(right, top),
-        },
-    };
-
-    const hbottom = at.math.Shape{
-        .line = .{
-            .p1 = at.math.vec2(left, bottom),
-            .p2 = at.math.vec2(right, bottom),
-        },
-    };
-
     var arena = Arena.init(allocator);
-    try arena.appendSlice(&[_]at.math.Shape{ vleft, vright, htop, hbottom });
+    try load_walls(&arena, @floatFromInt(term._screen.buffer.size.width), @floatFromInt(term._screen.buffer.size.height));
 
     return .{
         .terminal = term,
@@ -177,8 +171,10 @@ pub fn init(allocator: std.mem.Allocator) !Game {
         .fire = fire,
         .blossom = blossom,
         .zzz = zzz,
+        .bubble = bubble,
         .arena = arena,
-        .running = false,
+        .players = null,
+        .gravity = at.math.vec2(0, 30),
     };
 }
 
@@ -190,28 +186,32 @@ pub fn deinit(self: *Game) !void {
     self.blossom.deinit();
     self.zzz.deinit();
     self.arena.deinit();
+    self.bubble.deinit();
+    // for (&self.players) |*player| player.deinit();
 }
 
-pub fn run(self: *Game) !void {
-    self.running = true;
-    while (self.running) {
-        if (self.input.contains(.escape)) self.running = false;
-        if (self.input.contains(.up)) self.menu.previous();
-        if (self.input.contains(.down)) self.menu.next();
+pub fn run(self: *Game, allocator: std.mem.Allocator) !void {
+    self.menu_running = true;
 
-        switch (self.menu.selected_item) {
-            0 => {},
-            1 => {},
-            2 => self.running = false,
-            else => unreachable,
+    var should_zzz = true;
+    while (self.menu_running) {
+        if (self.input.nextEvent()) |key| {
+            switch (key.key) {
+                .enter => {
+                    if (self.menu.selected_item == 0) try self.run_match(allocator);
+                    if (self.menu.selected_item == 2) self.menu_running = false;
+                },
+                .down => self.menu.next(),
+                .up => self.menu.previous(),
+                .escape => self.menu_running = false,
+                else => {},
+            }
         }
-
         const menu_pos = at.math.vec2(
             @as(f32, @floatFromInt(self.terminal._screen.buffer.size.width)) / 5,
             @as(f32, @floatFromInt(self.terminal._screen.buffer.size.height / 3)) * -1,
         );
         try self.menu.draw(&self.painter, &menu_pos);
-        try self.terminal.draw();
 
         try self.tree.draw(&self.painter, &at.math.vec2(-50, -10));
         try self.tree_crown.draw(&self.painter, &at.math.vec2(-50, -10));
@@ -221,14 +221,134 @@ pub fn run(self: *Game) !void {
         self.painter.setCell(&.{ .bg = at.style.IndexedColor.bright_black });
         self.painter.drawLine(&self.fire.config.pos.add(&at.math.vec2(-3, 0)), &self.fire.config.pos.add(&at.math.vec2(3, 0)));
 
-        try at.sprite.spriteFromStr(PlayerAssets.PLAYER_RUN_LEFT_1, .{ .fg = .{ .rgb = .{ 102, 51, 153 } } }).draw(&self.painter, &at.math.vec2(6, 13));
-        self.zzz.draw(&self.painter, self.terminal.delta_time);
+        try at.sprite.spriteFromStr(PlayerAssets.IDLE, .{ .fg = .{ .rgb = .{ 102, 51, 153 } } }).draw(&self.painter, &at.math.vec2(6, 13));
+        if (should_zzz) self.zzz.draw(&self.painter, self.terminal.delta_time);
 
         self.painter.setCell(&.{ .bg = .{ .rgb = .{ 133, 153, 0 } } });
         for (self.arena.items) |*shape| {
-            self.painter.drawLineShape(&shape.line);
+            self.painter.drawRectangleShape(&shape.rectangle, true);
         }
+
+        if (self.menu.selected_item != 1) {
+            should_zzz = true;
+            self.bubble.reset();
+        }
+
+        switch (self.menu.selected_item) {
+            0 => {},
+            1 => {
+                try self.bubble.draw(&self.painter, &at.math.vec2(5, 7), self.terminal.delta_time);
+                should_zzz = false;
+            },
+            else => {},
+        }
+
+        try self.terminal.draw();
     }
 }
 
-// pub fn run_match(self: *Game) void {}
+fn run_match(self: *Game, allocator: std.mem.Allocator) !void {
+    const sprites = .{
+        at.sprite.Sprite.init(PlayerAssets.PLAYER_RUN_RIGHT_1, .{ .fg = at.style.IndexedColor.black }),
+        at.sprite.Sprite.init(PlayerAssets.PLAYER_RUN_RIGHT_2, .{ .fg = at.style.IndexedColor.black }),
+        at.sprite.Sprite.init(PlayerAssets.PLAYER_RUN_LEFT_1, .{ .fg = at.style.IndexedColor.black }),
+        at.sprite.Sprite.init(PlayerAssets.PLAYER_RUN_LEFT_2, .{ .fg = at.style.IndexedColor.black }),
+    };
+
+    const player1 = try Player.init(allocator, at.style.IndexedColor.black, .{
+        .start_pos = at.math.vec2(6, 13),
+        .movement_speed = 20,
+        .jump_height = 30,
+        .dash_speed = 2,
+        .dash_duration = 0.09,
+        .dash_cooldown = 0.7,
+        .max_health = 3,
+    }, &sprites);
+
+    self.players = .{ player1, undefined };
+    defer self.players.?[0].deinit();
+
+    self.match_running = true;
+    while (self.match_running) {
+        if (self.input.contains(.escape)) self.match_running = false;
+
+        self.players.?[0].update(&self.input, &self.arena, &self.gravity, self.terminal.delta_time);
+
+        try self.tree.draw(&self.painter, &at.math.vec2(-50, -10));
+        try self.tree_crown.draw(&self.painter, &at.math.vec2(-50, -10));
+        self.blossom.draw(&self.painter, self.terminal.delta_time);
+
+        try self.players.?[0].draw(&self.painter, self.terminal.delta_time);
+
+        self.painter.setCell(&.{ .bg = .{ .rgb = .{ 133, 153, 0 } } });
+        for (self.arena.items) |*shape| {
+            self.painter.drawRectangleShape(&shape.rectangle, false);
+        }
+
+        try self.terminal.draw();
+    }
+}
+
+fn load_walls(arena: *Arena, width: f32, height: f32) !void {
+    const left = (@floor(width) / -2) + 0.5;
+    const right = (@floor(width) / 2) - 0.5;
+    const top = (@floor(height) / -2) + 0.5;
+    const bottom = (@floor(height) / 2) - 0.5;
+
+    const vleft = at.math.Shape{
+        .rectangle = .{
+            .pos = at.math.vec2(left, top),
+            .width = 1,
+            .height = height,
+        },
+    };
+
+    const vright = at.math.Shape{
+        .rectangle = .{
+            .pos = at.math.vec2(right, top),
+            .width = 1,
+            .height = height,
+        },
+    };
+
+    const htop = at.math.Shape{
+        .rectangle = .{
+            .pos = at.math.vec2(left, top),
+            .width = width,
+            .height = 1,
+        },
+    };
+
+    const hbottom = at.math.Shape{
+        .rectangle = .{
+            .pos = at.math.vec2(left, bottom),
+            .width = width,
+            .height = 1,
+        },
+    };
+
+    const lplatform = at.math.Shape{
+        .rectangle = .{
+            .pos = at.math.vec2(@floor(width / 4), @floor(height / 4)),
+            .width = 15,
+            .height = 1,
+        },
+    };
+
+    const rplatform = at.math.Shape{
+        .rectangle = .{
+            .pos = at.math.vec2(@floor(-width / 4) - 15, @floor(height / 4)),
+            .width = 15,
+            .height = 1,
+        },
+    };
+
+    try arena.appendSlice(&[_]at.math.Shape{
+        vleft,
+        vright,
+        htop,
+        hbottom,
+        lplatform,
+        rplatform,
+    });
+}
